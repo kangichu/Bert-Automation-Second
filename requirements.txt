@@ -1,0 +1,12 @@
+pymysql
+numpy
+torch
+transformers
+faiss-cpu  # or faiss-gpu if you have GPU support
+tensorflow
+tensorboard
+python-dotenvpip 
+schedule
+faiss-cpu 
+langchain 
+sentence-transformers
