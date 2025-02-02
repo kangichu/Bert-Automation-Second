@@ -43,7 +43,7 @@ def run_pipeline(train_only=False, storage=False, index_file="faiss_index_ivfpq.
         index = train_faiss_index(embeddings)
         logging.info('FAISS index training complete.')
         return  # Exit after training if in training mode only
-
+ 
     # Step 5: Storing Embeddings into FAISS (Local Storage)
     if storage:
         try:
