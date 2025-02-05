@@ -28,51 +28,44 @@ def main():
         return  # or handle this as needed
 
     try:
-        if args.run_pipeline:
+        # If no argument is passed, show the available options
+        print("\nHere are the items that can be run:")
+        options = {
+            "1": "run_pipeline --train-only - only train the model, converts listings to embeddings without storage",
+            "2": "run_pipeline --storage-only - only store embeddings, assumes embeddings are already generated",
+            "3": "update_pipeline - this is when you're adding new listings into the FAISS database"
+        }
+        for key, value in options.items():
+            print(f"  {key}. {value}")
+
+        choice = input("\nPlease select the number representing the function you want to run: ").strip()
+        
+        if choice in ['1', '2']:
             from pipeline.run_pipeline import run_pipeline
-            train_only = args.train_only
-            storage_only = args.storage_only
-            run_pipeline(train_only=train_only, storage=storage_only)  # Call this function with parameters
+            train_only = choice == '1'
+            storage_only = choice == '2'
+            run_pipeline(train_only=train_only, storage=storage_only)
 
-            # Start watcher thread
-            watcher = DBWatcher()
-            watcher.start()
-            
-            try:
-                while True:
-                    time.sleep(1)
-            except KeyboardInterrupt:
-                logging.info("Shutting down watcher...")
-                watcher.stop()
-                watcher.join()
+            if storage_only:
+                
+                # Start watcher thread
+                watcher = DBWatcher()
+                watcher.start()
+                
+                try:
+                    while True:
+                        time.sleep(1)
+                except KeyboardInterrupt:
+                    logging.info("Shutting down watcher...")
+                    watcher.stop()
+                    watcher.join()
 
-        elif args.update_pipeline:
+        elif choice == '3':
             from pipeline.update_pipeline import update_pipeline
-            update_pipeline()  # Call this function if --update-pipeline is passed
+            update_pipeline()
         else:
-            # If no argument is passed, show the available options
-            print("\nHere are the items that can be run:")
-            options = {
-                "1": "run_pipeline --train-only - only train the model, converts listings to embeddings without storage",
-                "2": "run_pipeline --storage-only - only store embeddings, assumes embeddings are already generated",
-                "3": "update_pipeline - this is when you're adding new listings into the FAISS database"
-            }
-            for key, value in options.items():
-                print(f"  {key}. {value}")
-
-            choice = input("\nPlease select the number representing the function you want to run: ").strip()
-            
-            if choice in ['1', '2']:
-                from pipeline.run_pipeline import run_pipeline
-                train_only = choice == '1'
-                storage_only = choice == '2'
-                run_pipeline(train_only=train_only, storage=storage_only)
-            elif choice == '3':
-                from pipeline.update_pipeline import update_pipeline
-                update_pipeline()
-            else:
-                print("Invalid choice. Please run the script again with a valid option.")
-                sys.exit(1)
+            print("Invalid choice. Please run the script again with a valid option.")
+            sys.exit(1)
     
     except KeyboardInterrupt:
         logging.info("\nProcess interrupted by user (Ctrl+C). Cleaning up and exiting...")
