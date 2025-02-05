@@ -6,9 +6,13 @@ from handlers.mysql_data_fetch.fetch import fetch_data_from_mysql
 from handlers.data_handling.data_handling  import format_data
 from handlers.embeddings_generation.generate_embeddings  import generate_embeddings
 from handlers.embeddings_storage.embeddings_storage  import train_faiss_index, store_embeddings_in_trained_index
+from handlers.listings_tracker.tracker import ListingsTracker
 
 def run_pipeline(train_only=False, storage=False, index_file="faiss_index_ivfpq.bin"):
     logging.info(f"Arguments passed to function: train_only={train_only}, storage={storage}")
+
+    # Initialize listings tracker
+    tracker = ListingsTracker()
 
     # Step 1: Fetch data from MySQL
     logging.info('Fetching Data form MySQL Database')
@@ -64,6 +68,11 @@ def run_pipeline(train_only=False, storage=False, index_file="faiss_index_ivfpq.
 
             # Store embeddings in the trained index
             store_embeddings_in_trained_index(embeddings, index, index_file)
+
+            # Track stored listings
+            tracker.initialize_mappings(listing_ids)
+            logging.info(f"Tracked {len(listing_ids)} listings in initial index")
+
             logging.info("Embeddings stored in FAISS.")
 
         except Exception as e:
