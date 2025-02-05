@@ -1,8 +1,10 @@
 import os
 import sys
 import logging
+import time
 import argparse
 from utils.logger import setup_logging
+from utils.watcher import DBWatcher
 
 def main():
     # Set up argument parser
@@ -31,6 +33,19 @@ def main():
             train_only = args.train_only
             storage_only = args.storage_only
             run_pipeline(train_only=train_only, storage=storage_only)  # Call this function with parameters
+
+            # Start watcher thread
+            watcher = DBWatcher()
+            watcher.start()
+            
+            try:
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                logging.info("Shutting down watcher...")
+                watcher.stop()
+                watcher.join()
+
         elif args.update_pipeline:
             from pipeline.update_pipeline import update_pipeline
             update_pipeline()  # Call this function if --update-pipeline is passed

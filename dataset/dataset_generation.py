@@ -677,8 +677,8 @@ async def generate_dataset(num_listings=5, batch_size=50):
     
     # Prepare static data and dates
     static_data = prepare_static_data()
-    start_date = datetime(2024, 1, 1)
-    end_date = datetime(2024, 12, 31)
+    start_date = datetime(2025, 1, 1)
+    end_date = datetime(2025, 12, 31)
     
     try:
         # Process in batches
