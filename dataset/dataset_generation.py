@@ -1,23 +1,27 @@
 import os
 import sys
+import re
 import random
+from collections import defaultdict
 from openai import OpenAI, RateLimitError, APIError
 import asyncio
 from datetime import datetime, timedelta
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 import mysql.connector
+from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+import torch
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
 
-# Set the environment variable to disable oneDNN custom operations
-os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+# Add global counter
+generation_counter = defaultdict(int)
 
 # Initialize OpenAI client
 try:
     client = OpenAI(api_key=os.getenv('OPEN_AI_GPT_ACCESS_TOKEN', ''))
-    print(f"OpenAI API key loaded: {os.getenv('OPEN_AI_GPT_ACCESS_TOKEN')}")
+    print(f"OpenAI API key loaded successfully.")
 except Exception as e:
     print(f"Error initializing OpenAI client: {e}")
     sys.exit(1)
@@ -132,39 +136,165 @@ sq_area_ranges = {
     }
 }
 
+# Add after price_ranges dictionary
+amenities = {
+    'internal': [
+        'modern kitchen', 'walk-in closet', 'en-suite bathroom', 'hardwood floors',
+        'air conditioning', 'ceiling fans', 'built-in wardrobes', 'high ceilings',
+        'open plan layout', 'marble countertops', 'modern appliances', 'breakfast bar',
+        'laundry room', 'guest bathroom', 'study area', 'storage room',
+        'hot water system', 'internet connectivity', 'DSTV connection', 'security alarm'
+    ],
+    'external': [
+        'private garden', 'balcony', 'covered parking', 'swimming pool',
+        'electric fence', 'security gate', 'CCTV cameras', 'guard house',
+        'children\'s playground', 'BBQ area', 'outdoor seating', 'landscaped gardens',
+        'private driveway', 'backup generator', 'water storage tank', 'solar panels',
+        'carport', 'perimeter wall', 'garbage collection', 'outdoor lighting'
+    ],
+    'nearby': [
+        'shopping mall', 'public transport', 'schools', 'hospitals',
+        'restaurants', 'supermarket', 'gym', 'park',
+        'police station', 'bank', 'pharmacy', 'places of worship',
+        'main road access', 'business district', 'entertainment venues', 'medical facilities',
+        'petrol station', 'market', 'coffee shops', 'sports facilities'
+    ]
+}
+
 # Load pre-trained GPT-2 model and tokenizer
 try:
-    model_name = "gpt2"  # Use "gpt2-medium" or "gpt2-large" for better results
-    tokenizer = GPT2Tokenizer.from_pretrained(model_name)
-    model = GPT2LMHeadModel.from_pretrained(model_name)
-    tokenizer.pad_token = tokenizer.eos_token  # Set pad_token_id to eos_token_id to avoid warnings
+    gpt2_model_name = "gpt2"
+    gpt2_tokenizer = GPT2Tokenizer.from_pretrained(gpt2_model_name)
+    gpt2_model = GPT2LMHeadModel.from_pretrained(gpt2_model_name)
+    gpt2_tokenizer.pad_token = gpt2_tokenizer.eos_token
 except Exception as e:
     print(f"Error loading GPT-2 model: {e}")
     sys.exit(1)
 
+# Load Flan-T5-small model and tokenizer
+try:
+    flan_model_name = "google/flan-t5-small"
+    flan_tokenizer = AutoTokenizer.from_pretrained(flan_model_name)
+    flan_model = AutoModelForSeq2SeqLM.from_pretrained(flan_model_name)
+except Exception as e:
+    print(f"Error loading Flan-T5 model: {e}")
+    sys.exit(1)
+
+# Function to generate text using Flan-T5
+def generate_text_flan(prompt, max_length=50, num_return_sequences=1):
+    try:
+        if not isinstance(prompt, str) or not prompt.strip():
+            return ["Invalid prompt"]
+        
+        # Update counter and print status
+        generation_counter['flan'] += 1
+        print(f"\rGenerating using Flan x {generation_counter['flan']}", end='')
+
+        # Enhanced prompt engineering
+        if "Describe" in prompt:
+            task_prompt = (
+                f"Write a detailed property description including features, amenities, and highlights for: "
+                f"{prompt.strip()}. Mention the interior features, outdoor spaces, and nearby facilities."
+            )
+        else:
+            task_prompt = f"Write a clear and natural description for: {prompt.strip()}"
+        
+        inputs = flan_tokenizer(
+            task_prompt,
+            return_tensors="pt",
+            max_length=512,
+            truncation=True,
+            padding=True
+        )
+        
+        outputs = flan_model.generate(
+            inputs.input_ids,
+            max_length=max_length,
+            num_return_sequences=num_return_sequences,
+            do_sample=True,
+            temperature=0.8,  # Slightly increased for more variety
+            top_p=0.92,
+            repetition_penalty=1.3,  # Increased to reduce repetition
+            length_penalty=1.2,  # Increased to favor longer outputs
+            early_stopping=True,
+            num_beams=4  # Added beam search for better coherence
+        )
+        
+        results = []
+        for output in outputs:
+            text = flan_tokenizer.decode(output, skip_special_tokens=True)
+            text = text.strip()
+            # Only accept longer, more detailed descriptions
+            if text and len(text) > 25:  # Increased minimum length
+                # Ensure description ends with proper punctuation
+                if not text.endswith(('.', '!', '?')):
+                    text += '.'
+                results.append(text)
+                
+        return results if results else ["Generation failed"]
+        
+    except Exception as e:
+        print(f"Error generating text with Flan-T5: {e}")
+        return ["Error generating text."]
+
 # Function to generate text using GPT-2
 def generate_text_gpt2(prompt, max_length=50, num_return_sequences=1):
     try:
-        inputs = tokenizer.encode(prompt, return_tensors="pt", max_length=50, truncation=True)
-        attention_mask = inputs.ne(tokenizer.pad_token_id).float()  # Create attention mask
-        outputs = model.generate(
-            inputs,
-            attention_mask=attention_mask,  # Pass attention mask
-            max_length=max_length,
-            num_return_sequences=num_return_sequences,
-            no_repeat_ngram_size=2,
-            top_k=50,
-            top_p=0.95,
-            temperature=0.7,
-            do_sample=True,
-            pad_token_id=tokenizer.eos_token_id  # Explicitly set pad_token_id
+        if not isinstance(prompt, str) or not prompt.strip():
+            return ["Invalid prompt"]
+        
+        print("Generating using GPT-2.")
+        # Update counter and print status
+        generation_counter['gpt2'] += 1
+        print(f"\rGenerating using GPT-2 x {generation_counter['gpt2']}", end='')
+
+
+        prefix = "Generate description: "
+        cleaned_prompt = prefix + prompt.strip()
+        
+        inputs = gpt2_tokenizer.encode(
+            cleaned_prompt,
+            return_tensors="pt",
+            add_special_tokens=True,
+            max_length=50,
+            truncation=True
         )
-        results = [tokenizer.decode(output, skip_special_tokens=True) for output in outputs]
-        return results
+        
+        prompt_tokens = inputs[0].tolist()
+        prompt_length = len(prompt_tokens)
+        
+        outputs = gpt2_model.generate(
+            inputs,
+            max_length=max_length + prompt_length,
+            num_return_sequences=num_return_sequences,
+            no_repeat_ngram_size=3,
+            top_k=40,
+            top_p=0.92,
+            temperature=0.85,
+            do_sample=True,
+            pad_token_id=gpt2_tokenizer.eos_token_id,
+            min_length=prompt_length + 10,
+            repetition_penalty=1.5
+        )
+        
+        results = []
+        for output in outputs:
+            new_tokens = output[prompt_length:]
+            text = gpt2_tokenizer.decode(new_tokens, skip_special_tokens=True)
+            text = text.strip()
+            
+            prompt_text = prompt.lower()
+            if (text and len(text) > 10 and 
+                prompt_text not in text.lower() and
+                "generate description" not in text.lower()):
+                results.append(text)
+        
+        return results if results else ["Generation failed to produce valid output"]
+        
     except Exception as e:
         print(f"Error generating text with GPT-2: {e}")
         return ["Error generating text."]
-
+    
 # Function to generate text using OpenAI's GPT-3.5
 async def generate_text(prompt, max_tokens=100, temperature=0.7):
     try:
@@ -176,7 +306,7 @@ async def generate_text(prompt, max_tokens=100, temperature=0.7):
         )
         return completion.choices[0].message.content.strip()
     except RateLimitError:
-        print("OpenAI API quota exceeded. Falling back to GPT-2 or placeholder text.")
+        print("OpenAI API quota exceeded. Falling back to Flan or GPT-2.")
         return None
     except APIError as e:
         print(f"OpenAI API error: {e}")
@@ -286,113 +416,326 @@ def generate_sq_area(property_type):
         print(f"Error generating square area: {e}")
         return 0
 
-# Function to generate a random name based on type
-def generate_name(property_type):
+# Function to generate a random name based on type manually
+def generate_property_name_manually(property_type):
     try:
         return random.choice(property_name_map[property_type])
     except Exception as e:
         print(f"Error generating property name: {e}")
         return "Unknown Property"
 
+# Function to generate a random property name based on type using Flan-T5
+def generate_property_names(property_type):
+    """Generate single property name using Flan-T5 model"""
+    try:
+        prompt = (
+            f"Generate exactly one luxury property name in this format:\n"
+            f"Format: [Adjective] [Feature] {property_type}\n"
+            f"Adjective must be one of: Royal, Grand, Luxe, Imperial, Majestic, Elite, Noble, Crown\n"
+            f"Feature must be one of: Summit, Azure, Palms, Heights, Gardens\n"
+            f"Examples:\n"
+            f"Noble Summit Villa\n"
+            f"Grand Azure Apartment\n"
+            f"Imperial Palms Estate\n"
+            f"Your generated name:"
+        )
+        
+        inputs = flan_tokenizer(prompt, return_tensors="pt", max_length=128, truncation=True)
+        
+        outputs = flan_model.generate(
+            inputs.input_ids,
+            max_length=20,
+            num_return_sequences=1,
+            temperature=0.9,  # Increased for more variety
+            do_sample=True,
+            no_repeat_ngram_size=2,
+            num_beams=3,
+            min_length=5
+        )
+        
+        name = flan_tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
+        
+        adjectives = [
+            # Luxury/Elite
+            'royal', 'grand', 'luxe', 'imperial', 'majestic', 'elite', 'noble', 'crown',
+            'premium', 'sovereign', 'regal', 'paramount', 'opulent', 'elegant', 'pristine',
+            'refined', 'exclusive', 'prime', 'luxury', 'stellar', 'supreme', 'celestial',
+            'classical', 'superior', 'prestigious', 'eminent', 'divine', 'magnificent',
+            'splendid', 'distinguished', 'exquisite', 'masterful', 'premier', 'grandiose',
+            'aristocratic', 'chic', 'deluxe', 'gilded', 'lavish', 'ornate', 'palatial', 'plush',
+            'posh', 'ritzy', 'sumptuous', 'swanky', 'upscale', 'venerated', 'vogue', 'world-class',
+            'boutique', 'haute', 'rarefied', 'sophisticated', 'unparalleled', 'unrivaled', 'vanguard',
+            'bespoke', 'custom', 'tailored', 'high-end', 'first-rate', 'top-tier', 'gold-standard',
+            'iconic', 'legendary', 'mythic', 'hallowed', 'celebrated', 'renowned', 'fabled',
+            'glamorous', 'dazzling', 'radiant', 'gleaming', 'lustrous', 'shimmering', 'sparkling',
+
+            # Quality/Status
+            'pinnacle', 'zenith', 'summit', 'apex', 'ultimate', 'premium', 'superior',
+            'refined', 'distinctive', 'privileged', 'prestigious', 'elevated', 'masterful',
+            'signature', 'legendary', 'innovative', 'timeless', 'transcendent', 'unique',
+            'unmatched', 'peerless', 'nonpareil', 'unsurpassed', 'foremost', 'leading', 'dominant',
+            'preeminent', 'paramount', 'quintessential', 'archetypal', 'definitive', 'model',
+            'exemplary', 'ideal', 'perfect', 'flawless', 'immaculate', 'pristine', 'spotless',
+            'impeccable', 'unblemished', 'untainted', 'unspoiled', 'untarnished', 'unadulterated',
+            'authentic', 'genuine', 'bona fide', 'legitimate', 'certified', 'accredited', 'official',
+
+            # Architectural
+            'classic', 'heritage', 'landmark', 'monumental', 'palatial', 'stately',
+            'architectural', 'baronial', 'castellated', 'columned', 'domed', 'magnificent',
+            'neoclassical', 'gothic', 'romanesque', 'art deco', 'art nouveau', 'brutalist', 'futuristic',
+            'minimalist', 'postmodern', 'rustic', 'mediterranean', 'tuscan', 'spanish', 'moroccan',
+            'oriental', 'exotic', 'eclectic', 'avant-garde', 'cutting-edge', 'state-of-the-art',
+            'symmetrical', 'ornamental', 'sculptural', 'monolithic', 'fortified', 'sprawling', 'towering',
+
+            # Cultural/Historical
+            'renaissance', 'victorian', 'georgian', 'regency', 'colonial', 'tudor',
+            'venetian', 'florentine', 'byzantine', 'baroque', 'modern', 'contemporary',
+            'ancient', 'medieval', 'feudal', 'enlightenment', 'industrial', 'modernist',
+            'post-industrial', 'revolutionary', 'traditional', 'folkloric', 'mythological', 'tribal',
+            'indigenous', 'ethnic', 'cosmopolitan', 'global', 'international', 'continental', 'exotic',
+
+            # Emotional/Evocative
+            'serene', 'tranquil', 'peaceful', 'calm', 'harmonious', 'balanced', 'soothing', 'relaxing',
+            'invigorating', 'inspiring', 'uplifting', 'enchanting', 'captivating', 'mesmerizing',
+            'alluring', 'enticing', 'breathtaking', 'stunning', 'awe-inspiring', 'majestic', 'grandiose'
+        ]
+        
+        features = [
+            # Geographic
+            'summit', 'azure', 'palms', 'heights', 'gardens', 'oasis', 'meadows', 'springs',
+            'grove', 'forest', 'lagoon', 'marina', 'isle', 'beach', 'river', 'lakes',
+            'valley', 'hills', 'glen', 'creek', 'brook', 'cliffs', 'woods', 'park',
+            'ridge', 'haven', 'harbor', 'bay', 'cove', 'point', 'peninsula', 'shores',
+            'plateau', 'canyon', 'ravine', 'gorge', 'fjord', 'delta', 'estuary', 'wetlands',
+            'marsh', 'savannah', 'prairie', 'tundra', 'desert', 'dunes', 'volcano', 'crater',
+            'geyser', 'hot springs', 'waterfront', 'seaside', 'coastline', 'headland', 'promontory',
+            'strait', 'channel', 'archipelago', 'atoll', 'reef', 'jungle', 'rainforest', 'wilderness',
+            'outback',
+
+            # Architectural
+            'towers', 'plaza', 'estate', 'manor', 'court', 'palace', 'pavilion', 'arcade',
+            'terrace', 'villa', 'residences', 'mansion', 'sanctuary', 'galleria', 'colonnade',
+            'chateau', 'gates', 'square', 'mews', 'quarters', 'promenade', 'commons',
+            'arcade', 'boulevard', 'rotunda', 'portico', 'veranda', 'courtyard', 'atrium',
+            'obelisk', 'spire', 'dome', 'turret', 'bastion', 'rampart', 'citadel', 'fortress',
+            'keep', 'bungalow', 'chalet', 'lodge', 'cabin', 'farmhouse', 'windmill', 'lighthouse',
+            'aqueduct', 'viaduct', 'bridge', 'tunnel', 'amphitheater', 'coliseum', 'stadium',
+
+            # Natural Elements
+            'sunrise', 'sunset', 'dawn', 'dusk', 'horizon', 'vista', 'panorama', 'skyline',
+            'meadow', 'garden', 'grove', 'orchard', 'commons', 'green', 'park', 'woods',
+            'forest', 'springs', 'waters', 'stream', 'brook', 'creek', 'falls', 'cascade',
+            'waterfall', 'rapids', 'whirlpool', 'geyser', 'hot spring', 'glacier', 'iceberg',
+            'coral reef', 'mangrove', 'wetland', 'marshland', 'swamp', 'bog', 'fen', 'peatland',
+
+            # Premium Materials
+            'marble', 'ivory', 'crystal', 'pearl', 'emerald', 'sapphire', 'jade', 'amber',
+            'ruby', 'golden', 'silver', 'platinum', 'diamond', 'bronze', 'copper', 'quartz',
+            'granite', 'onyx', 'coral', 'jasper', 'topaz', 'garnet', 'opal', 'beryl',
+            'obsidian', 'malachite', 'lapis lazuli', 'turquoise', 'agate', 'amethyst', 'citrine',
+            'moonstone', 'zircon', 'spinel', 'peridot', 'tanzanite', 'aquamarine', 'bloodstone',
+
+            # Directional/Positional
+            'north', 'south', 'east', 'west', 'central', 'upper', 'lower', 'mid',
+            'corner', 'cross', 'center', 'edge', 'rim', 'crown', 'peak', 'crest',
+            'foothills', 'plateau', 'basin', 'divide', 'watershed', 'headwaters', 'mouth',
+            'confluence', 'tributary', 'meander', 'oxbow', 'reservoir', 'dam', 'levee',
+
+            # Seasonal/Environmental
+            'spring', 'summer', 'autumn', 'winter', 'solstice', 'equinox', 'twilight',
+            'dawn', 'mist', 'fog', 'rain', 'snow', 'frost', 'ice', 'breeze', 'wind',
+            'monsoon', 'typhoon', 'hurricane', 'tornado', 'cyclone', 'blizzard', 'avalanche',
+            'landslide', 'earthquake', 'volcano', 'eruption', 'lava', 'ash', 'crater'
+        ]
+        
+        # Clean and validate name
+        words = name.strip().split()
+        if len(words) >= 2:
+            if words[0].lower() in adjectives:
+                name = f"{words[0].capitalize()} {words[1].capitalize()} {property_type}"
+            else:
+                name = f"{random.choice(adjectives).capitalize()} {random.choice(features).capitalize()} {property_type}"
+        else:
+            name = f"{random.choice(adjectives).capitalize()} {random.choice(features).capitalize()} {property_type}"
+            
+        return name
+
+    except Exception as e:
+        print(f"Error generating property name: {e}")
+        return f"{random.choice(['Grand', 'Elite', 'Majestic'])} Summit {property_type}"
+
+# Function to generate random amenities for a property
+def get_random_amenities():
+    """Generate random selection of amenities for a property"""
+    return {
+        'internal': random.sample(amenities['internal'], k=random.randint(4, 8)),
+        'external': random.sample(amenities['external'], k=random.randint(3, 6)),
+        'nearby': random.sample(amenities['nearby'], k=random.randint(3, 5))
+    }
+
+# Function to format amenities into natural language for prompt
+def format_amenities_prompt(selected_amenities):
+    """Format amenities into natural language for prompt"""
+    return (
+        f"Interior features include {', '.join(selected_amenities['internal'])}. "
+        f"External amenities include {', '.join(selected_amenities['external'])}. "
+        f"Nearby facilities include {', '.join(selected_amenities['nearby'])}."
+    )
+
 # Generate a full dataset
-async def generate_dataset(num_listings=5):
-    print(f"Starting dataset generation for {num_listings} listings...")
-    start_time = datetime.now()
-    print(f"Start time: {start_time}")
+def prepare_static_data():
+    """Prepare static data used for generation"""
+    return {
+        'categories': ["Sale", "Rent"],
+        'counties': ["Nairobi County", "Mombasa County", "Kisumu County", "Nakuru County"],
+        'divisions': ["Kilimani", "Westlands", "Kileleshwa", "Karen", "Langata", "Kawangware"],
+        'types': ["Apartment", "Villa", "Townhouse", "Penthouse", "Studio", "House", "New Development", "Cottage", "Duplex"],
+        'classes': ["Luxury", "Regular", "Affordable"],
+        'furnishings': ["Furnished", "Unfurnished", "Partially Furnished"],
+        'bedrooms': [1, 2, 3, 4, 5],
+        'bathrooms': [1, 2, 3, 4],
+        'viewing_fees': [0, 1000, 2000, 3000, 5000],
+        'statuses': ["Published", "Draft"],
+        'availabilities': ["Available", "Unavailable"],
+        'complex_ids': [33, 34, None],
+        'user_ids': [4, 5, 6, 7],
+        'currencies': ["KES", "USD"]
+    }
 
-    # Sample data for generating realistic listings
-    categories = ["Sale", "Rent"]
-    counties = ["Nairobi County", "Mombasa County", "Kisumu County", "Nakuru County"]
-    divisions = ["Kilimani", "Westlands", "Kileleshwa", "Karen", "Langata", "Kawangware"]
-    types = ["Apartment", "Villa", "Townhouse", "Penthouse", "Studio", "House", "New Development", "Cottage", "Duplex"]
-    classes = ["Luxury", "Regular", "Affordable"]
-    furnishings = ["Furnished", "Unfurnished", "Partially Furnished"]
-    bedrooms = [1, 2, 3, 4, 5]
-    bathrooms = [1, 2, 3, 4]
-    viewing_fees = [0, 1000, 2000, 3000, 5000]
-    statuses = ["Published", "Draft"]
-    availabilities = ["Available", "Unavailable"]
-    complex_ids = [33, 34, None]
-    user_ids = [4, 5, 6, 7]
-    currencies = ["KES", "USD"]
+async def generate_single_listing(static_data, start_date, end_date):
+    """Generate a single listing with all required fields"""
+    try:
+        type_ = random.choice(static_data['types'])
+        title = generate_property_names(type_) 
+        division = random.choice(static_data['divisions'])
+        class_ = random.choice(static_data['classes'])
+        county = random.choice(static_data['counties'])
+        
+        # Generate amenities
+        selected_amenities = get_random_amenities()
+        amenities_text = format_amenities_prompt(selected_amenities)
 
-    # Create MySQL connection
-    conn = create_mysql_connection()
-    create_table(conn)
-
-    # Generate listings
-    start_date = datetime(2024, 1, 1)
-    end_date = datetime(2024, 12, 31)
-
-    for i in range(1, num_listings + 1):
-        # Generate title
-        title = generate_name(random.choice(types))
-
-        # Generate location description
-        location_prompt = "Write a short and engaging description for the location of a property in " + random.choice(divisions) + ": "
-        location_description = await generate_text(location_prompt, max_tokens=50)
-        if location_description is None:
-            # Fallback to GPT-2 or placeholder text
-            location_description = generate_text_gpt2(location_prompt, max_length=50, num_return_sequences=1)[0]
-
-        # Generate property description
-        property_prompt = "Describe a " + random.choice(classes) + " " + random.choice(types) + " in " + random.choice(counties) + ": "
-        property_description = await generate_text(property_prompt, max_tokens=100)
-        if property_description is None:
-            # Fallback to GPT-2 or placeholder text
-            property_description = generate_text_gpt2(property_prompt, max_length=100, num_return_sequences=1)[0]
+        # Generate descriptions concurrently
+        location_prompt = f"Write a short and engaging description for the location of a property in {division}: "
+        property_prompt = f"Describe the property called {title} a {class_} {type_} in {county} with amenities such as {amenities_text}: "
+        
+        # Use Flan-T5 with GPT-2 fallback
+        location_description = generate_text_flan(location_prompt)[0]
+        if "error" in location_description.lower() or "failed" in location_description.lower():
+            location_description = generate_text_gpt2(location_prompt)[0]
+                
+        property_description = generate_text_flan(property_prompt)[0]
+        if "error" in property_description.lower() or "failed" in property_description.lower():
+            property_description = generate_text_gpt2(property_prompt)[0]
 
         # Generate other fields
-        ref = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz0123456789', k=10))
-        slug = title.lower().replace(" ", "-").replace(",", "").replace(".", "")
-        category = random.choice(categories)
-        county = random.choice(counties)
-        county_specific = random.choice(divisions)
-        longitude = round(random.uniform(36.70, 36.90), 6)
-        latitude = round(random.uniform(-1.40, -1.20), 6)
-        type_ = random.choice(types)
-        class_ = random.choice(classes)
-        furnishing = random.choice(furnishings) if type_ != "Land" else None
-        bedroom = random.choice(bedrooms) if type_ != "Land" else None
-        bathroom = random.choice(bathrooms) if type_ != "Land" else None
-        sq_area = generate_sq_area(type_)
-        amount = generate_amount(category)  # Generate amount based on category
-        viewing_fee = random.choice(viewing_fees)
-        status = random.choice(statuses)
-        availability = random.choice(availabilities)
-        subscription_status = None
-        complex_id = random.choice(complex_ids)
-        user_id = random.choice(user_ids)
-        created_at = random_date(start_date, end_date).strftime("%Y-%m-%d %H:%M:%S")
-        updated_at = (datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S") + timedelta(days=random.randint(0, 30))).strftime("%Y-%m-%d %H:%M:%S")
-        link = None
-        currency = random.choice(currencies)
-
-        # Create listing tuple
-        listing = (
-            title, ref, slug, category, county, county_specific, longitude, latitude,
-            location_description, type_, class_, furnishing, bedroom, bathroom, sq_area,
-            amount, viewing_fee, property_description, status, availability, subscription_status,
-            complex_id, user_id, created_at, updated_at, link, currency
+        category = random.choice(static_data['categories'])
+        return (
+            title,
+            ''.join(random.choices('abcdefghijklmnopqrstuvwxyz0123456789', k=10)),  # ref
+            title.lower().replace(" ", "-").replace(",", "").replace(".", ""),  # slug
+            category,
+            county,
+            division,  # county_specific
+            round(random.uniform(36.70, 36.90), 6),  # longitude
+            round(random.uniform(-1.40, -1.20), 6),  # latitude
+            location_description,
+            type_,
+            class_,
+            random.choice(static_data['furnishings']) if type_ != "Land" else None,  # furnishing
+            random.choice(static_data['bedrooms']) if type_ != "Land" else None,  # bedroom
+            random.choice(static_data['bathrooms']) if type_ != "Land" else None,  # bathroom
+            generate_sq_area(type_),
+            generate_amount(category),
+            random.choice(static_data['viewing_fees']),
+            property_description,
+            random.choice(static_data['statuses']),
+            random.choice(static_data['availabilities']),
+            None,  # subscription_status
+            random.choice(static_data['complex_ids']),
+            random.choice(static_data['user_ids']),
+            random_date(start_date, end_date).strftime("%Y-%m-%d %H:%M:%S"),  # created_at
+            (random_date(start_date, end_date) + timedelta(days=random.randint(0, 30))).strftime("%Y-%m-%d %H:%M:%S"),  # updated_at
+            None,  # link
+            random.choice(static_data['currencies'])
         )
+    except Exception as e:
+        print(f"Error generating listing: {e}")
+        return None
 
-        # Insert into database
-        insert_listing(conn, listing)
+async def generate_dataset(num_listings=5, batch_size=50):
+    """Generate dataset with optimized batch processing"""
+    print(f"Starting dataset generation for {num_listings} listings...")
+    start_time = datetime.now()
+    
+    # Create connection pool
+    pool = mysql.connector.pooling.MySQLConnectionPool(
+        pool_name="listing_pool",
+        pool_size=5,
+        **MYSQL_CONFIG
+    )
+    
+    # Prepare static data and dates
+    static_data = prepare_static_data()
+    start_date = datetime(2024, 1, 1)
+    end_date = datetime(2024, 12, 31)
+    
+    try:
+        # Process in batches
+        for batch_start in range(0, num_listings, batch_size):
+            batch_end = min(batch_start + batch_size, num_listings)
+            print(f"\nGenerating batch {batch_start + 1} to {batch_end}...")
 
-        if i % 100 == 0:
-            print(f"Generated {i} listings...")
-
-    end_time = datetime.now()
-    print(f"Finished generating {num_listings} listings.")
-    print(f"End time: {end_time}")
-    print(f"Total time taken: {end_time - start_time}")
-    conn.close()
-
+            # Reset counter for new batch
+            generation_counter['flan'] = 0
+            generation_counter['gpt2'] = 0
+            
+            # Generate batch of listings concurrently
+            tasks = [generate_single_listing(static_data, start_date, end_date) 
+                    for _ in range(batch_end - batch_start)]
+            batch_listings = await asyncio.gather(*tasks)
+            
+            # Filter out failed generations
+            valid_listings = [l for l in batch_listings if l is not None]
+            
+            # Batch insert into database
+            if valid_listings:
+                conn = pool.get_connection()
+                try:
+                    cursor = conn.cursor()
+                    cursor.executemany("""
+                        INSERT INTO listings_datasets 
+                        (name, ref, slug, category, county, county_specific, 
+                         longitude, latitude, location_description, type, class, 
+                         furnishing, bedrooms, bathrooms, sq_area, amount, 
+                         viewing_fee, property_description, status, availability, 
+                         subscription_status, complex_id, user_id, created_at, 
+                         updated_at, link, currency) 
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                               %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    """, valid_listings)
+                    conn.commit()
+                except Exception as e:
+                    print(f"Database error: {e}")
+                finally:
+                    cursor.close()
+                    conn.close()
+            
+            print(f"Processed {len(valid_listings)} listings in current batch")
+            
+        end_time = datetime.now()
+        print(f"\nFinished generating {num_listings} listings.")
+        print(f"Total time taken: {end_time - start_time}")
+        
+    except Exception as e:
+        print(f"Error during dataset generation: {e}")
+    finally:
+        pool._remove_connections()
 
 if __name__ == "__main__":
     try:
-        # Run the script asynchronously
-        asyncio.run(generate_dataset(num_listings=5))
+        os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+        asyncio.run(generate_dataset(num_listings=1000, batch_size=50))
     except KeyboardInterrupt:
-        print("\nProcess interrupted by user (Ctrl+C). Cleaning up and exiting...")
-        sys.exit(0)  # Exit gracefully
+        print("\nProcess interrupted by user. Cleaning up...")
+        sys.exit(0)
