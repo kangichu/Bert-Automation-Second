@@ -12,16 +12,16 @@ def fetch_data_from_mysql():
         SELECT 
             users.first_name, 
             users.last_name,
-            businesses.business_name
+            businesses.business_name,
             businesses.account_type,
             businesses.business_email,
-            listings.id, listings.name, listings.ref, listings.slug, listings.category, 
-            listings.county, listings.county_specific, listings.longitude, listings.latitude, 
-            listings.location_description, listings.type AS listing_type, listings.class AS listing_class, 
-            listings.furnishing, listings.bedrooms, listings.bathrooms, listings.sq_area, listings.amount, 
-            listings.viewing_fee, listings.property_description, listings.status, listings.availability, 
-            listings.subscription_status, listings.complex_id, listings.user_id, listings.created_at, 
-            listings.updated_at, listings.link, listings.currency, 
+            listings_datasets.id, listings_datasets.name, listings_datasets.ref, listings_datasets.slug, listings_datasets.category, 
+            listings_datasets.county, listings_datasets.county_specific, listings_datasets.longitude, listings_datasets.latitude, 
+            listings_datasets.location_description, listings_datasets.type AS listing_type, listings_datasets.class AS listing_class, 
+            listings_datasets.furnishing, listings_datasets.bedrooms, listings_datasets.bathrooms, listings_datasets.sq_area, listings_datasets.amount, 
+            listings_datasets.viewing_fee, listings_datasets.property_description, listings_datasets.status, listings_datasets.availability, 
+            listings_datasets.subscription_status, listings_datasets.complex_id, listings_datasets.user_id, listings_datasets.created_at, 
+            listings_datasets.updated_at, listings_datasets.link, listings_datasets.currency, 
             complexes.title AS complex_title, complexes.ref_code AS complex_ref_code, complexes.slug AS complex_slug, 
             complexes.email AS complex_email, complexes.mobile AS complex_mobile, complexes.description AS complex_description, 
             complexes.type AS complex_type, complexes.class AS complex_class, complexes.county AS complex_county, 
@@ -30,12 +30,12 @@ def fetch_data_from_mysql():
             complexes.available AS complex_available, 
             GROUP_CONCAT(CONCAT(amenities.type, ': ', amenities.amenity) SEPARATOR '; ') AS amenities
         FROM listings 
-        LEFT JOIN complexes ON listings.complex_id = complexes.id 
-        LEFT JOIN amenities ON listings.id = amenities.listing_id
-        LEFT JOIN users ON listings.user_id = users.id
+        LEFT JOIN complexes ON listings_datasets.complex_id = complexes.id 
+        LEFT JOIN amenities ON listings_datasets.id = amenities.listing_id
+        LEFT JOIN users ON listings_datasets.user_id = users.id
         LEFT JOIN businesses ON users.id = businesses.user_id
-        WHERE listings.status = 'Published'
-        GROUP BY listings.id;
+        WHERE listings_datasets.status = 'Published'
+        GROUP BY listings_datasets.id;
     """
 
     try:
@@ -73,16 +73,16 @@ def fetch_new_listings(tracker):
         SELECT 
             users.first_name, 
             users.last_name,
-            businesses.business_name
+            businesses.business_name,
             businesses.account_type,
             businesses.business_email,
-            listings.id, listings.name, listings.ref, listings.slug, listings.category, 
-            listings.county, listings.county_specific, listings.longitude, listings.latitude, 
-            listings.location_description, listings.type AS listing_type, listings.class AS listing_class, 
-            listings.furnishing, listings.bedrooms, listings.bathrooms, listings.sq_area, listings.amount, 
-            listings.viewing_fee, listings.property_description, listings.status, listings.availability, 
-            listings.subscription_status, listings.complex_id, listings.user_id, listings.created_at, 
-            listings.updated_at, listings.link, listings.currency, 
+            listings_datasets.id, listings_datasets.name, listings_datasets.ref, listings_datasets.slug, listings_datasets.category, 
+            listings_datasets.county, listings_datasets.county_specific, listings_datasets.longitude, listings_datasets.latitude, 
+            listings_datasets.location_description, listings_datasets.type AS listing_type, listings_datasets.class AS listing_class, 
+            listings_datasets.furnishing, listings_datasets.bedrooms, listings_datasets.bathrooms, listings_datasets.sq_area, listings_datasets.amount, 
+            listings_datasets.viewing_fee, listings_datasets.property_description, listings_datasets.status, listings_datasets.availability, 
+            listings_datasets.subscription_status, listings_datasets.complex_id, listings_datasets.user_id, listings_datasets.created_at, 
+            listings_datasets.updated_at, listings_datasets.link, listings_datasets.currency, 
             complexes.title AS complex_title, complexes.ref_code AS complex_ref_code, complexes.slug AS complex_slug, 
             complexes.email AS complex_email, complexes.mobile AS complex_mobile, complexes.description AS complex_description, 
             complexes.type AS complex_type, complexes.class AS complex_class, complexes.county AS complex_county, 
@@ -91,13 +91,13 @@ def fetch_new_listings(tracker):
             complexes.available AS complex_available, 
             GROUP_CONCAT(CONCAT(amenities.type, ': ', amenities.amenity) SEPARATOR '; ') AS amenities
         FROM listings 
-        LEFT JOIN complexes ON listings.complex_id = complexes.id 
-        LEFT JOIN amenities ON listings.id = amenities.listing_id
-        LEFT JOIN users ON listings.user_id = users.id
+        LEFT JOIN complexes ON listings_datasets.complex_id = complexes.id 
+        LEFT JOIN amenities ON listings_datasets.id = amenities.listing_id
+        LEFT JOIN users ON listings_datasets.user_id = users.id
         LEFT JOIN businesses ON users.id = businesses.user_id
-        WHERE listings.status = 'Published'
-        AND listings.id NOT IN (%s)
-        GROUP BY listings.id;
+        WHERE listings_datasets.status = 'Published'
+        AND listings_datasets.id NOT IN (%s)
+        GROUP BY listings_datasets.id;
     """
     
     try:
@@ -110,7 +110,7 @@ def fetch_new_listings(tracker):
                 cursor.execute(formatted_query)
                 rows = cursor.fetchall()
 
-        logging.info(f"Fetched {len(rows)} new listings.")
+        logging.info(f"Fetched {len(rows)} new listings_datasets.")
 
         column_names = [desc[0] for desc in cursor.description]
         listings = [dict(zip(column_names, row)) for row in rows]

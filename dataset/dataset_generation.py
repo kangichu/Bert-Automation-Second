@@ -143,21 +143,35 @@ amenities = {
         'air conditioning', 'ceiling fans', 'built-in wardrobes', 'high ceilings',
         'open plan layout', 'marble countertops', 'modern appliances', 'breakfast bar',
         'laundry room', 'guest bathroom', 'study area', 'storage room',
-        'hot water system', 'internet connectivity', 'DSTV connection', 'security alarm'
+        'hot water system', 'internet connectivity', 'DSTV connection', 'security alarm',
+        'smart home system', 'fireplace', 'soundproof walls', 'central heating',
+        'wine cellar', 'home theater', 'sauna', 'jacuzzi', 'steam room', 'elevator',
+        'panic room', 'underfloor heating', 'skylights', 'bay windows', 'library',
+        'gaming room', 'art studio', 'walk-in pantry', 'pet-friendly features',
+        'energy-efficient lighting', 'solar water heating'
     ],
     'external': [
         'private garden', 'balcony', 'covered parking', 'swimming pool',
         'electric fence', 'security gate', 'CCTV cameras', 'guard house',
         'children\'s playground', 'BBQ area', 'outdoor seating', 'landscaped gardens',
         'private driveway', 'backup generator', 'water storage tank', 'solar panels',
-        'carport', 'perimeter wall', 'garbage collection', 'outdoor lighting'
+        'carport', 'perimeter wall', 'garbage collection', 'outdoor lighting',
+        'tennis court', 'basketball court', 'gazebo', 'kennel', 'greenhouse',
+        'pond', 'fountain', 'outdoor kitchen', 'fire pit', 'rooftop terrace',
+        'helipad', 'boat dock', 'horse stable', 'orchard', 'vineyard',
+        'barbed wire fencing', 'motion sensor lights', 'dog run', 'vegetable garden',
+        'rainwater harvesting system'
     ],
     'nearby': [
         'shopping mall', 'public transport', 'schools', 'hospitals',
         'restaurants', 'supermarket', 'gym', 'park',
         'police station', 'bank', 'pharmacy', 'places of worship',
         'main road access', 'business district', 'entertainment venues', 'medical facilities',
-        'petrol station', 'market', 'coffee shops', 'sports facilities'
+        'petrol station', 'market', 'coffee shops', 'sports facilities',
+        'airport', 'train station', 'bus terminal', 'cinema', 'theater',
+        'golf course', 'hiking trails', 'beach', 'lake', 'river',
+        'university', 'college', 'daycare', 'vet clinic', 'post office',
+        'art gallery', 'museum', 'zoo', 'amusement park', 'cycling paths'
     ]
 }
 
@@ -573,6 +587,54 @@ def get_random_amenities():
         'nearby': random.sample(amenities['nearby'], k=random.randint(3, 5))
     }
 
+# Function to write amenities as SQL INSERT statements to file
+def insert_amenities(conn, amenities_dict, listing_id, user_id):
+    type_display = {
+        'internal': 'Internal Amenities',
+        'external': 'External Amenities', 
+        'nearby': 'Nearby Amenities'
+    }
+    
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
+    try:
+        cursor = conn.cursor()
+        
+        # Get next available ID
+        cursor.execute("SELECT MAX(id) FROM amenities")
+        max_id = cursor.fetchone()[0] or 0
+        next_id = max_id + 1
+        
+        # Prepare all amenities for batch insert
+        amenities_data = []
+        for amenity_type, amenities in amenities_dict.items():
+            for amenity in amenities:
+                amenities_data.append((
+                    next_id,
+                    type_display[amenity_type],
+                    amenity,
+                    listing_id,
+                    user_id,
+                    timestamp,
+                    timestamp
+                ))
+                next_id += 1
+        
+        # Batch insert with ID field
+        cursor.executemany("""
+            INSERT INTO amenities (id, `type`, amenity, listing_id, user_id, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """, amenities_data)
+        
+        conn.commit()
+        
+    except Exception as e:
+        conn.rollback()
+        print(f"Error inserting amenities: {e}")
+        raise
+    finally:
+        cursor.close()
+
 # Function to format amenities into natural language for prompt
 def format_amenities_prompt(selected_amenities):
     """Format amenities into natural language for prompt"""
@@ -602,6 +664,7 @@ def prepare_static_data():
         'currencies': ["KES", "USD"]
     }
 
+# Generate a single listing with all required fields
 async def generate_single_listing(static_data, start_date, end_date):
     """Generate a single listing with all required fields"""
     try:
@@ -658,11 +721,12 @@ async def generate_single_listing(static_data, start_date, end_date):
             (random_date(start_date, end_date) + timedelta(days=random.randint(0, 30))).strftime("%Y-%m-%d %H:%M:%S"),  # updated_at
             None,  # link
             random.choice(static_data['currencies'])
-        )
+        ), selected_amenities
     except Exception as e:
         print(f"Error generating listing: {e}")
         return None
 
+# Generate a dataset with optimized batch processing
 async def generate_dataset(num_listings=5, batch_size=50):
     """Generate dataset with optimized batch processing"""
     print(f"Starting dataset generation for {num_listings} listings...")
@@ -693,10 +757,15 @@ async def generate_dataset(num_listings=5, batch_size=50):
             # Generate batch of listings concurrently
             tasks = [generate_single_listing(static_data, start_date, end_date) 
                     for _ in range(batch_end - batch_start)]
-            batch_listings = await asyncio.gather(*tasks)
+            batch_results = await asyncio.gather(*tasks)
             
             # Filter out failed generations
-            valid_listings = [l for l in batch_listings if l is not None]
+            # valid_listings = [l for l in batch_listings if l is not None]
+
+            # Unpack listings and amenities, filter None results
+            valid_results = [r for r in batch_results if r is not None]
+            valid_listings = [r[0] for r in valid_results]
+            listings_amenities = [r[1] for r in valid_results]
             
             # Batch insert into database
             if valid_listings:
@@ -714,7 +783,17 @@ async def generate_dataset(num_listings=5, batch_size=50):
                         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
                                %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     """, valid_listings)
+
+                    first_id = cursor.lastrowid
                     conn.commit()
+
+                    # Use original amenities for each listing
+                    for idx, (listing, amenities) in enumerate(zip(valid_listings, listings_amenities)):
+                        listing_id = first_id + idx
+                        user_id = listing[22]
+                        insert_amenities(conn, amenities, listing_id, user_id)  # Fixed: Pass connection first
+                        
+                        
                 except Exception as e:
                     print(f"Database error: {e}")
                 finally:
@@ -735,7 +814,7 @@ async def generate_dataset(num_listings=5, batch_size=50):
 if __name__ == "__main__":
     try:
         os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
-        asyncio.run(generate_dataset(num_listings=1000, batch_size=50))
+        asyncio.run(generate_dataset(num_listings=5, batch_size=50))
     except KeyboardInterrupt:
         print("\nProcess interrupted by user. Cleaning up...")
         sys.exit(0)
