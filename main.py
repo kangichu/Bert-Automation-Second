@@ -3,7 +3,9 @@ import sys
 import logging
 import time
 import argparse
+import asyncio
 from utils.logger import setup_logging
+from dataset.dataset_generation import generate_dataset
 
 def load_run_pipeline():
     from pipeline.run_pipeline import run_pipeline
@@ -18,6 +20,8 @@ def load_db_watcher():
     return DBWatcher
 
 def main():
+    setup_logging()
+
     # Set the environment variable to disable oneDNN custom operations
     os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 
@@ -34,7 +38,8 @@ def main():
         options = {
             "1": "run_pipeline --train-only - only train the model, converts listings to embeddings without storage",
             "2": "run_pipeline --storage-only - only store embeddings, assumes embeddings are already generated",
-            "3": "update_pipeline - this is when you're adding new listings into the FAISS database"
+            "3": "update_pipeline - this is when you're adding new listings into the FAISS database",
+            "4": "generate_dataset - generate synthetic listing data"
         }
         for key, value in options.items():
             print(f"  {key}. {value}")
@@ -78,6 +83,13 @@ def main():
             # from pipeline.update_pipeline import update_pipeline
             update_pipeline = load_update_pipeline()
             update_pipeline()
+
+        elif choice == '4':
+            # Only this option runs async
+            num_listings = int(input("Number of listings (default 2000): ") or 2000)
+            batch_size = int(input("Batch size (default 50): ") or 50)
+            asyncio.run(generate_dataset(num_listings, batch_size))
+
         else:
             print("Invalid choice. Please run the script again with a valid option.")
             sys.exit(1)
@@ -85,6 +97,7 @@ def main():
     except KeyboardInterrupt:
         logging.info("\nProcess interrupted by user (Ctrl+C). Cleaning up and exiting...")
         sys.exit(0)  # Exit gracefully
+
 
 if __name__ == "__main__":
     main()

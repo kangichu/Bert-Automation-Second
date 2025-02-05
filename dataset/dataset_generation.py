@@ -148,7 +148,20 @@ amenities = {
         'wine cellar', 'home theater', 'sauna', 'jacuzzi', 'steam room', 'elevator',
         'panic room', 'underfloor heating', 'skylights', 'bay windows', 'library',
         'gaming room', 'art studio', 'walk-in pantry', 'pet-friendly features',
-        'energy-efficient lighting', 'solar water heating'
+        'energy-efficient lighting', 'solar water heating', 'home office', 
+        'wet bar', 'mud room', 'butler pantry', 'home gym', 'meditation room',
+        'music room', 'craft room', 'home spa', 'hidden room', 'biometric locks',
+        'air purification system', 'radiant floor cooling', 'infrared heating',
+        'greenhouse window', 'indoor pool', 'indoor garden', 'sound system',
+        'home automation', 'touchless faucets', 'smart appliances', 'saltwater aquarium',
+        'art gallery space', 'virtual reality room', 'wine tasting room', 'chef\'s kitchen',
+        'personal cinema', 'tasting room', 'billiards room', 'darkroom for photography',
+        'recording studio', 'sci-fi themed room', 'hobby room', 'escape room',
+        'trophy room', 'servant quarters', 'indoor playground', 'climate-controlled wine storage',
+        'book nook', 'secret passage', 'indoor waterfall', 'energy recovery ventilation',
+        'geothermal heating', 'custom murals', 'star-gazing room', 'glass floor panels',
+        'infinity mirror room', 'bulletproof windows', 'acoustic panels', '3D printing lab',
+        'robot butler charging station', 'augmented reality room', 'bunk room', 'aquarium room'
     ],
     'external': [
         'private garden', 'balcony', 'covered parking', 'swimming pool',
@@ -160,7 +173,18 @@ amenities = {
         'pond', 'fountain', 'outdoor kitchen', 'fire pit', 'rooftop terrace',
         'helipad', 'boat dock', 'horse stable', 'orchard', 'vineyard',
         'barbed wire fencing', 'motion sensor lights', 'dog run', 'vegetable garden',
-        'rainwater harvesting system'
+        'rainwater harvesting system', 'outdoor shower', 'tree house', 'guest cottage',
+        'sports field', 'skate park', 'outdoor cinema', 'beekeeping area', 'wind turbine',
+        'infinity pool', 'water slide', 'mini golf', 'outdoor gym', 'yoga platform',
+        'climbing wall', 'zip line', 'archery range', 'outdoor sauna', 'hot spring',
+        'sculpture garden', 'outdoor art gallery', 'botanical garden', 'labyrinth',
+        'observation deck', 'solar car charging', 'EV charging station', 'wildlife pond',
+        'bird watching station', 'fish pond', 'outdoor chess set', 'petanque court',
+        'rock garden', 'rain garden', 'bocce ball court', 'outdoor dance floor',
+        'amphitheater', 'outdoor music performance area', 'natatorium', 'sensory garden',
+        'kite flying area', 'astro turf for sports', 'beach volleyball court', 'skating rink',
+        'glamping site', 'outdoor library', 'hammock area', 'cable car', 'funicular',
+        'tree canopy walk', 'nature trail', 'kite surfing launch', 'flower maze'
     ],
     'nearby': [
         'shopping mall', 'public transport', 'schools', 'hospitals',
@@ -171,7 +195,25 @@ amenities = {
         'airport', 'train station', 'bus terminal', 'cinema', 'theater',
         'golf course', 'hiking trails', 'beach', 'lake', 'river',
         'university', 'college', 'daycare', 'vet clinic', 'post office',
-        'art gallery', 'museum', 'zoo', 'amusement park', 'cycling paths'
+        'art gallery', 'museum', 'zoo', 'amusement park', 'cycling paths',
+        'library', 'community center', 'nightlife', 'ferry service', 'marina',
+        'ski resort', 'national park', 'historical sites', 'farmer\'s market',
+        'concert hall', 'botanical garden', 'water park', 'surf spots',
+        'ice rink', 'indoor skydiving', 'escape room center', 'comedy club',
+        'virtual reality arcade', 'laser tag', 'go-kart track', 'paintball field',
+        'arcade', 'aquarium', 'observation tower', 'planetarium', 'observatory',
+        'karaoke bars', 'trampoline park', 'wave pool', 'rafting center',
+        'hot air balloon launch', 'paragliding spot', 'skydiving school', 'vineyard tours',
+        'horseback riding trails', 'bungee jumping', 'sailing school', 'kayaking launch',
+        'rock climbing gym', 'extreme sports park', 'theme park', 'wildlife sanctuary',
+        'botanical research center', 'sculpture park', 'street art festival', 
+        'cultural heritage site', 'carnival grounds', 'flea market', 'auction house',
+        'festival grounds', 'artisan workshops', 'live music venue', 'street food market',
+        'jazz club', 'folk dance hall', 'open mic night spots', 'comic book store',
+        'board game cafe', 'escape game venues', 'e-sports arena', 'drone racing',
+        'submarine tours', 'whale watching center', 'eco-tourism spots', 'agritourism',
+        'ghost town exploration', 'ghost hunting tours', 'historical reenactment sites',
+        'medieval festival venue', 'renaissance fair grounds', 'steampunk event space'
     ]
 }
 
@@ -622,7 +664,7 @@ def insert_amenities(conn, amenities_dict, listing_id, user_id):
         
         # Batch insert with ID field
         cursor.executemany("""
-            INSERT INTO amenities (id, `type`, amenity, listing_id, user_id, created_at, updated_at)
+            INSERT INTO amenities_dataset (id, `type`, amenity, listing_id, user_id, created_at, updated_at)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
         """, amenities_data)
         
@@ -814,7 +856,7 @@ async def generate_dataset(num_listings=5, batch_size=50):
 if __name__ == "__main__":
     try:
         os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
-        asyncio.run(generate_dataset(num_listings=5, batch_size=50))
+        asyncio.run(generate_dataset(num_listings=2000, batch_size=50))
     except KeyboardInterrupt:
-        print("\nProcess interrupted by user. Cleaning up...")
+        print("\n  Process interrupted by user. Cleaning up...")
         sys.exit(0)

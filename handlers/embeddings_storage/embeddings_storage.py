@@ -1,6 +1,7 @@
 import logging
 import faiss
 import numpy as np
+from handlers.listings_tracker.tracker import ListingsTracker
 
 RETRAIN_THRESHOLD = 0.5  # If new embeddings are ≥ 50% of stored ones, retrain
 
@@ -96,7 +97,7 @@ def check_and_retrain_index(embeddings, index, index_file="faiss_index_ivfpq.bin
     return index  # Return the potentially retrained index
 
 
-def store_embeddings_in_trained_index(embeddings, index, index_file="faiss_index_ivfpq.bin"):
+def store_embeddings_in_trained_index(embeddings, index, listing_ids, index_file="faiss_index_ivfpq.bin"):
     """
     Store embeddings in a trained FAISS index.
 
@@ -105,20 +106,39 @@ def store_embeddings_in_trained_index(embeddings, index, index_file="faiss_index
     :param index_file: Path to save the updated index
     :return: None
     """
-    embeddings = embeddings.astype('float32')
+    try:
+        tracker = ListingsTracker()
+        embeddings = embeddings.astype('float32')
 
-    if not index.is_trained:
-        logging.error("Attempted to add embeddings to an untrained index!")
-        return
+        if not index.is_trained:
+            logging.error("Attempted to add embeddings to an untrained index!")
+            return
 
-    # First, check if retraining is needed
-    index = check_and_retrain_index(embeddings, index, index_file)
+        # Get current position before adding
+        current_position = index.ntotal
 
-    logging.info(f"Adding {embeddings.shape[0]} embeddings to FAISS index...")
-    index.add(embeddings)
+        # First, check if retraining is needed
+        index = check_and_retrain_index(embeddings, index, index_file)
 
-    faiss.write_index(index, index_file)
-    logging.info(f"Updated FAISS index stored at {index_file}")
+        logging.info(f"Adding {embeddings.shape[0]} embeddings to FAISS index...")
+        index.add(embeddings)
 
+        # Create position mappings after successful addition
+        position_map = {
+            listing_id: current_position + idx 
+            for idx, listing_id in enumerate(listing_ids)
+        }
+        
+        # Update tracker with new mappings
+        tracker.add_mappings(position_map)
+
+        faiss.write_index(index, index_file)
+        logging.info(f"Updated FAISS index stored at {index_file}")
+        logging.info(f"Added {len(listing_ids)} listings to position mapping")
+        return True
+    
+    except Exception as e:
+        logging.error(f"Error storing embeddings: {e}")
+        return False
 
 

@@ -67,7 +67,7 @@ def run_pipeline(train_only=False, storage=False, index_file="faiss_index_ivfpq.
                 logging.info("FAISS index training completed and saved.")
 
             # Store embeddings in the trained index
-            store_embeddings_in_trained_index(embeddings, index, index_file)
+            store_embeddings_in_trained_index(embeddings, index, listing_ids, index_file)
 
             # Track stored listings
             tracker.initialize_mappings(listing_ids)

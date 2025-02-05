@@ -28,10 +28,10 @@ def fetch_data_from_mysql():
             complexes.county_specific AS complex_county_specific, complexes.longitude AS complex_longitude, 
             complexes.latitude AS complex_latitude, complexes.location_description AS complex_location_description, 
             complexes.available AS complex_available, 
-            GROUP_CONCAT(CONCAT(amenities.type, ': ', amenities.amenity) SEPARATOR '; ') AS amenities
-        FROM listings 
+            GROUP_CONCAT(CONCAT(amenities_dataset.type, ': ', amenities_dataset.amenity) SEPARATOR '; ') AS amenities
+        FROM listings_datasets 
         LEFT JOIN complexes ON listings_datasets.complex_id = complexes.id 
-        LEFT JOIN amenities ON listings_datasets.id = amenities.listing_id
+        LEFT JOIN amenities_dataset ON listings_datasets.id = amenities_dataset.listing_id
         LEFT JOIN users ON listings_datasets.user_id = users.id
         LEFT JOIN businesses ON users.id = businesses.user_id
         WHERE listings_datasets.status = 'Published'
@@ -89,10 +89,10 @@ def fetch_new_listings(tracker):
             complexes.county_specific AS complex_county_specific, complexes.longitude AS complex_longitude, 
             complexes.latitude AS complex_latitude, complexes.location_description AS complex_location_description, 
             complexes.available AS complex_available, 
-            GROUP_CONCAT(CONCAT(amenities.type, ': ', amenities.amenity) SEPARATOR '; ') AS amenities
-        FROM listings 
+            GROUP_CONCAT(CONCAT(amenities_dataset.type, ': ', amenities_dataset.amenity) SEPARATOR '; ') AS amenities
+        FROM listings_datasets 
         LEFT JOIN complexes ON listings_datasets.complex_id = complexes.id 
-        LEFT JOIN amenities ON listings_datasets.id = amenities.listing_id
+        LEFT JOIN amenities_dataset ON listings_datasets.id = amenities_dataset.listing_id
         LEFT JOIN users ON listings_datasets.user_id = users.id
         LEFT JOIN businesses ON users.id = businesses.user_id
         WHERE listings_datasets.status = 'Published'
