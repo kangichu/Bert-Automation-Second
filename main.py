@@ -4,19 +4,20 @@ import logging
 import time
 import argparse
 from utils.logger import setup_logging
-from utils.watcher import DBWatcher
+
+def load_run_pipeline():
+    from pipeline.run_pipeline import run_pipeline
+    return run_pipeline
+
+def load_update_pipeline():
+    from pipeline.update_pipeline import update_pipeline
+    return update_pipeline
+
+def load_db_watcher():
+    from utils.watcher import DBWatcher
+    return DBWatcher
 
 def main():
-    # Set up argument parser
-    parser = argparse.ArgumentParser(description="Run different functions based on the argument.")
-    parser.add_argument('--run-pipeline', action='store_true', help='Run the full pipeline')
-    parser.add_argument('--update-pipeline', action='store_true', help='Update the pipeline with new listings')
-    parser.add_argument('--train-only', action='store_true', help='Only train the model without storing embeddings')
-    parser.add_argument('--storage-only', action='store_true', help='Only store embeddings without training')
-
-    # Parse the arguments
-    args = parser.parse_args()
-
     # Set the environment variable to disable oneDNN custom operations
     os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 
@@ -41,27 +42,41 @@ def main():
         choice = input("\nPlease select the number representing the function you want to run: ").strip()
         
         if choice in ['1', '2']:
-            from pipeline.run_pipeline import run_pipeline
+            # from pipeline.run_pipeline import run_pipeline
+            run_pipeline = load_run_pipeline()
             train_only = choice == '1'
             storage_only = choice == '2'
-            run_pipeline(train_only=train_only, storage=storage_only)
+            success = run_pipeline(train_only=train_only, storage=storage_only)
+
+            if not success:
+                logging.error("Pipeline failed to complete successfully")
+                return
 
             if storage_only:
-                
-                # Start watcher thread
-                watcher = DBWatcher()
-                watcher.start()
-                
                 try:
-                    while True:
-                        time.sleep(1)
-                except KeyboardInterrupt:
-                    logging.info("Shutting down watcher...")
-                    watcher.stop()
-                    watcher.join()
+                    # Start watcher thread
+                    DBWatcher = load_db_watcher()
+                    watcher = DBWatcher()
+                    watcher.start()
+                    logging.info("DB Watcher started successfully")
+                    
+                    try:
+                        while True:
+                            time.sleep(1)
+                    except KeyboardInterrupt:
+                        logging.info("Shutting down watcher...")
+                        watcher.stop()
+                        watcher.join()
+                        logging.info("Watcher shutdown complete")
+                except Exception as e:
+                    logging.error(f"Error in watcher thread: {e}")
+                    if 'watcher' in locals():
+                        watcher.stop()
+                        watcher.join()
 
         elif choice == '3':
-            from pipeline.update_pipeline import update_pipeline
+            # from pipeline.update_pipeline import update_pipeline
+            update_pipeline = load_update_pipeline()
             update_pipeline()
         else:
             print("Invalid choice. Please run the script again with a valid option.")
