@@ -34,6 +34,7 @@
      - Data formatting routines that convert raw database listings into narrative descriptions.
      - Methods to generate embeddings from narratives using a BERT model (or similar approach).
      - Functions for training a FAISS index and storing embeddings into that index.
+     - A tracker for managing listings.
    - The custom logger is also set up to ensure consistent log messages throughout the pipeline execution.
 
 2. **Pipeline Function Definition: `run_pipeline`**  
@@ -69,6 +70,75 @@
      - It reloads the FAISS index from the file and compares the total number of vectors stored with the number of embeddings generated.
      - A simple nearest neighbor search is conducted (using the first embedding) to verify that the index is operational.
      - If any inconsistency or error occurs during verification, an error message is logged, and the process terminates accordingly.
+
+---
+
+### **Part 3: The Update Pipeline Function Implementation**
+
+1. **Importing Required Libraries and Functions**  
+   - The update pipeline module imports logging, FAISS, NumPy, and several custom modules:
+     - Functions for fetching new listings from a MySQL database.
+     - Data formatting routines.
+     - Methods to generate embeddings.
+     - Functions for storing embeddings into the FAISS index.
+     - A tracker for managing listings.
+
+2. **Pipeline Function Definition: `update_pipeline`**  
+   - The update pipeline function is designed to handle adding new listings into the FAISS index.
+
+3. **Step 1 – Data Fetching from MySQL**  
+   - The pipeline begins by logging that it is fetching new data from a MySQL database.
+   - It calls a dedicated function to retrieve new listing data. If no data is fetched, the process logs an error and terminates early.
+
+4. **Step 2 – Data Formatting**  
+   - The new listings are formatted into narratives. If the formatting process fails, the error is logged, and the pipeline stops.
+
+5. **Step 3 – Embedding Generation**  
+   - The new narratives are converted into embeddings. If the embedding generation fails, the process logs the error and exits.
+
+6. **Step 4 – Loading Existing FAISS Index**  
+   - The pipeline attempts to load an existing FAISS index from a local file. If the index cannot be loaded, the process logs an error and terminates.
+
+7. **Step 5 – Storing New Embeddings in FAISS**  
+   - The new embeddings are added to the FAISS index. The tracker is updated with the new listings. Successful storage is logged.
+
+8. **Step 6 – Verification of New Embedding Storage**  
+   - The pipeline verifies that the new embeddings have been correctly stored in the FAISS index. If any inconsistency or error occurs during verification, an error message is logged, and the process terminates accordingly.
+
+---
+
+### **Part 4: Dataset Generation**
+
+1. **Imports and Environment Setup**  
+   - The dataset generation script imports various Python modules needed for its functionality, including standard libraries, third-party libraries, and custom modules.
+   - Environment variables are loaded from a `.env` file using the `dotenv` package.
+
+2. **Initializing the OpenAI Client**  
+   - The script initializes an OpenAI client using the API key from the environment variables.
+
+3. **Database Configuration**  
+   - A dictionary (`MYSQL_CONFIG`) is defined with the MySQL database connection parameters.
+
+4. **Defining Property-Related Data**  
+   - Dictionaries are defined for price ranges, property name mappings, square area ranges, and amenities.
+
+5. **Loading GPT-2 and Flan-T5 Models and Tokenizers**  
+   - The script loads pre-trained GPT-2 and Flan-T5 models and their tokenizers from Hugging Face.
+
+6. **Text Generation Functions**  
+   - Functions are defined to generate text using Flan-T5, GPT-2, and OpenAI’s GPT-3.5.
+
+7. **Utility Functions**  
+   - Functions are defined for random date generation, MySQL connection, creating the database table, and inserting a listing into the database.
+
+8. **Data Generation Helpers**  
+   - Helper functions are defined for generating random amounts, square areas, property names, and amenities.
+
+9. **Dataset Generation Function**  
+   - An asynchronous function is defined to generate a dataset of property listings. This function drives the main logic of dataset generation.
+
+10. **Script Execution Entry Point**  
+    - The final block checks if the script is being run directly and executes the dataset generation function.
 
 ---
 
