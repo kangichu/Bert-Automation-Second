@@ -1,5 +1,6 @@
 .env
 /logs
+/storage
 /faiss_index
 /dataset/.env
 **/__pycache__/

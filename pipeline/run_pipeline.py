@@ -46,7 +46,7 @@ def run_pipeline(train_only=False, storage=False, index_file="faiss_index_ivfpq.
         logging.info('Training FAISS index...')
         index = train_faiss_index(embeddings)
         logging.info('FAISS index training complete.')
-        return  # Exit after training if in training mode only
+        return  True # Exit after training if in training mode only
  
     # Step 5: Storing Embeddings into FAISS (Local Storage)
     if storage:
@@ -78,7 +78,6 @@ def run_pipeline(train_only=False, storage=False, index_file="faiss_index_ivfpq.
         except Exception as e:
             logging.error(f"Error processing FAISS index: {str(e)}")
             return
-
 
     # Step 6: Verify Storage (after storage phase)
     logging.info('Verifying Embeddings Storage in FAISS')

@@ -5,6 +5,7 @@ import random
 from collections import defaultdict
 from openai import OpenAI, RateLimitError, APIError
 import asyncio
+import signal
 from datetime import datetime, timedelta
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 import mysql.connector
@@ -236,15 +237,63 @@ except Exception as e:
     print(f"Error loading Flan-T5 model: {e}")
     sys.exit(1)
 
+# Graceful exit handler
+class GracefulExit:
+    def __init__(self):
+        self.pool = None
+        self.should_exit = False
+        self.loop = None
+        self.models = []  # Track loaded models
+        signal.signal(signal.SIGINT, self.exit_gracefully)
+        signal.signal(signal.SIGTERM, self.exit_gracefully)
+    
+    async def cleanup(self):
+        """Cleanup resources asynchronously"""
+        # Cancel running tasks
+        if self.loop:
+            for task in asyncio.all_tasks(self.loop):
+                if task is not asyncio.current_task():
+                    task.cancel()
+            
+        # Close database connections
+        if self.pool:
+            self.pool._remove_connections()
+            
+        # Release GPU memory
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            
+        # Clear model references
+        for model in self.models:
+            del model
+        self.models.clear()
+    
+    def exit_gracefully(self, *args):
+        """Handle exit signal"""
+        print("\nReceived termination signal. Cleaning up...")
+        self.should_exit = True
+        
+        try:
+            # Run cleanup
+            if self.loop and self.loop.is_running():
+                self.loop.create_task(self.cleanup())
+                self.loop.stop()
+            else:
+                asyncio.run(self.cleanup())
+        except Exception as e:
+            print(f"Error during cleanup: {e}")
+        finally:
+            sys.exit(0)
+
 # Function to generate text using Flan-T5
-def generate_text_flan(prompt, max_length=50, num_return_sequences=1):
+def generate_text_flan(prompt, batch_size=50, max_length=50, num_return_sequences=1):
     try:
         if not isinstance(prompt, str) or not prompt.strip():
             return ["Invalid prompt"]
         
-        # Update counter and print status
+        # Update counter and print status with batch info
         generation_counter['flan'] += 1
-        print(f"\rGenerating using Flan x {generation_counter['flan']}", end='')
+        print(f"\rGenerating batch with Flan-T5: {generation_counter['flan']}/{batch_size * 2}", end='', flush=True)
 
         # Enhanced prompt engineering
         if "Describe" in prompt:
@@ -294,7 +343,7 @@ def generate_text_flan(prompt, max_length=50, num_return_sequences=1):
         return ["Error generating text."]
 
 # Function to generate text using GPT-2
-def generate_text_gpt2(prompt, max_length=50, num_return_sequences=1):
+def generate_text_gpt2(prompt, batch_size=50, max_length=50, num_return_sequences=1):
     try:
         if not isinstance(prompt, str) or not prompt.strip():
             return ["Invalid prompt"]
@@ -302,8 +351,8 @@ def generate_text_gpt2(prompt, max_length=50, num_return_sequences=1):
         print("Generating using GPT-2.")
         # Update counter and print status
         generation_counter['gpt2'] += 1
-        print(f"\rGenerating using GPT-2 x {generation_counter['gpt2']}", end='')
-
+        print(f"\rGenerating using GPT-2 x: {generation_counter['flan']}/{batch_size * 2}", end='', flush=True)
+        
 
         prefix = "Generate description: "
         cleaned_prompt = prefix + prompt.strip()
@@ -436,8 +485,54 @@ def create_table(conn):
         sys.exit(1)
 
 # Function to insert a listing into the database
-def insert_listing(conn, listing):
+def ensure_listings_table(conn):
+    """Ensure listings table exists"""
     try:
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS listings_datasets (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name TEXT,
+                ref TEXT,
+                slug TEXT,
+                category TEXT,
+                county TEXT,
+                county_specific TEXT,
+                longitude DECIMAL(9,6),
+                latitude DECIMAL(9,6),
+                location_description TEXT,
+                type TEXT,
+                class TEXT,
+                furnishing TEXT,
+                bedrooms INT,
+                bathrooms INT,
+                sq_area INT,
+                amount INT,
+                viewing_fee INT,
+                property_description TEXT,
+                status TEXT,
+                availability TEXT,
+                subscription_status TEXT,
+                complex_id INT,
+                user_id INT,
+                created_at DATETIME,
+                updated_at DATETIME,
+                link TEXT,
+                currency TEXT
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ''')
+        conn.commit()
+    except Exception as e:
+        print(f"\nError creating listings table: {e}")
+        raise
+    finally:
+        cursor.close()
+
+# Function to insert a listing into the database
+def insert_listing(conn, listing):
+    """Insert single listing and return inserted ID"""
+    try:
+        ensure_listings_table(conn)
         cursor = conn.cursor()
         cursor.execute('''
             INSERT INTO listings_datasets (
@@ -447,10 +542,13 @@ def insert_listing(conn, listing):
                 subscription_status, complex_id, user_id, created_at, updated_at, link, currency
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ''', listing)
+        last_id = cursor.lastrowid
         conn.commit()
+        return last_id
     except mysql.connector.Error as e:
-        print(f"Error inserting listing into database: {e}")
+        print(f"Error inserting listing: {e}")
         conn.rollback()
+        return None
 
 # Function to generate a random amount based on category
 def generate_amount(category):
@@ -629,6 +727,31 @@ def get_random_amenities():
         'nearby': random.sample(amenities['nearby'], k=random.randint(3, 5))
     }
 
+# Function to ensure amenities table exists
+def ensure_amenities_table(conn):
+    """Ensure amenities table exists"""
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS amenities_dataset (
+                id INT PRIMARY KEY,
+                type VARCHAR(50) NOT NULL,
+                amenity TEXT NOT NULL,
+                listing_id INT NOT NULL,
+                user_id INT NOT NULL,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL,
+                INDEX (listing_id),
+                INDEX (user_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """)
+        conn.commit()
+    except Exception as e:
+        print(f"\nError creating amenities table: {e}")
+        raise
+    finally:
+        cursor.close()
+
 # Function to write amenities as SQL INSERT statements to file
 def insert_amenities(conn, amenities_dict, listing_id, user_id):
     type_display = {
@@ -640,14 +763,15 @@ def insert_amenities(conn, amenities_dict, listing_id, user_id):
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
     try:
+        ensure_amenities_table(conn)
         cursor = conn.cursor()
         
-        # Get next available ID
-        cursor.execute("SELECT MAX(id) FROM amenities")
-        max_id = cursor.fetchone()[0] or 0
+        # Fix: Use correct table name and handle NULL
+        cursor.execute("SELECT COALESCE(MAX(id), 0) FROM amenities_dataset")
+        max_id = cursor.fetchone()[0]
         next_id = max_id + 1
         
-        # Prepare all amenities for batch insert
+        # Prepare amenities data with validated IDs
         amenities_data = []
         for amenity_type, amenities in amenities_dict.items():
             for amenity in amenities:
@@ -662,17 +786,18 @@ def insert_amenities(conn, amenities_dict, listing_id, user_id):
                 ))
                 next_id += 1
         
-        # Batch insert with ID field
+        # Insert with duplicate key handling
         cursor.executemany("""
-            INSERT INTO amenities_dataset (id, `type`, amenity, listing_id, user_id, created_at, updated_at)
+            INSERT INTO amenities_dataset 
+            (id, `type`, amenity, listing_id, user_id, created_at, updated_at)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
         """, amenities_data)
         
         conn.commit()
         
     except Exception as e:
+        print(f"\nError inserting amenities: {e}")
         conn.rollback()
-        print(f"Error inserting amenities: {e}")
         raise
     finally:
         cursor.close()
@@ -707,7 +832,7 @@ def prepare_static_data():
     }
 
 # Generate a single listing with all required fields
-async def generate_single_listing(static_data, start_date, end_date):
+async def generate_single_listing(static_data, start_date, end_date, batch_size):
     """Generate a single listing with all required fields"""
     try:
         type_ = random.choice(static_data['types'])
@@ -725,13 +850,13 @@ async def generate_single_listing(static_data, start_date, end_date):
         property_prompt = f"Describe the property called {title} a {class_} {type_} in {county} with amenities such as {amenities_text}: "
         
         # Use Flan-T5 with GPT-2 fallback
-        location_description = generate_text_flan(location_prompt)[0]
+        location_description = generate_text_flan(location_prompt, batch_size)[0]
         if "error" in location_description.lower() or "failed" in location_description.lower():
-            location_description = generate_text_gpt2(location_prompt)[0]
+            location_description = generate_text_gpt2(location_prompt, batch_size)[0]
                 
-        property_description = generate_text_flan(property_prompt)[0]
+        property_description = generate_text_flan(property_prompt, batch_size)[0]
         if "error" in property_description.lower() or "failed" in property_description.lower():
-            property_description = generate_text_gpt2(property_prompt)[0]
+            property_description = generate_text_gpt2(property_prompt, batch_size)[0]
 
         # Generate other fields
         category = random.choice(static_data['categories'])
@@ -771,6 +896,11 @@ async def generate_single_listing(static_data, start_date, end_date):
 # Generate a dataset with optimized batch processing
 async def generate_dataset(num_listings=5, batch_size=50):
     """Generate dataset with optimized batch processing"""
+    exit_handler = GracefulExit()
+    exit_handler.loop = asyncio.get_event_loop()
+    exit_handler.models = [flan_model, gpt2_model]  # Track models
+
+
     print(f"Starting dataset generation for {num_listings} listings...")
     start_time = datetime.now()
     
@@ -780,7 +910,9 @@ async def generate_dataset(num_listings=5, batch_size=50):
         pool_size=5,
         **MYSQL_CONFIG
     )
-    
+
+    exit_handler.pool = pool
+
     # Prepare static data and dates
     static_data = prepare_static_data()
     start_date = datetime(2025, 1, 1)
@@ -789,6 +921,9 @@ async def generate_dataset(num_listings=5, batch_size=50):
     try:
         # Process in batches
         for batch_start in range(0, num_listings, batch_size):
+            if exit_handler.should_exit:
+                break
+
             batch_end = min(batch_start + batch_size, num_listings)
             print(f"\nGenerating batch {batch_start + 1} to {batch_end}...")
 
@@ -797,7 +932,7 @@ async def generate_dataset(num_listings=5, batch_size=50):
             generation_counter['gpt2'] = 0
             
             # Generate batch of listings concurrently
-            tasks = [generate_single_listing(static_data, start_date, end_date) 
+            tasks = [generate_single_listing(static_data, start_date, end_date, batch_size) 
                     for _ in range(batch_end - batch_start)]
             batch_results = await asyncio.gather(*tasks)
             
@@ -813,36 +948,27 @@ async def generate_dataset(num_listings=5, batch_size=50):
             if valid_listings:
                 conn = pool.get_connection()
                 try:
-                    cursor = conn.cursor()
-                    cursor.executemany("""
-                        INSERT INTO listings_datasets 
-                        (name, ref, slug, category, county, county_specific, 
-                         longitude, latitude, location_description, type, class, 
-                         furnishing, bedrooms, bathrooms, sq_area, amount, 
-                         viewing_fee, property_description, status, availability, 
-                         subscription_status, complex_id, user_id, created_at, 
-                         updated_at, link, currency) 
-                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
-                               %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                    """, valid_listings)
-
-                    first_id = cursor.lastrowid
-                    conn.commit()
-
-                    # Use original amenities for each listing
+                    # Insert first listing to get ID
+                    first_id = insert_listing(conn, valid_listings[0])
+                    if first_id is None:
+                        raise ValueError("Failed to get first insert ID")
+                        
+                    # Insert remaining listings
+                    for listing in valid_listings[1:]:
+                        insert_listing(conn, listing)
+                        
+                    # Insert amenities with verified first_id
                     for idx, (listing, amenities) in enumerate(zip(valid_listings, listings_amenities)):
                         listing_id = first_id + idx
                         user_id = listing[22]
-                        insert_amenities(conn, amenities, listing_id, user_id)  # Fixed: Pass connection first
-                        
+                        insert_amenities(conn, amenities, listing_id, user_id)
                         
                 except Exception as e:
                     print(f"Database error: {e}")
                 finally:
-                    cursor.close()
                     conn.close()
             
-            print(f"Processed {len(valid_listings)} listings in current batch")
+            print(f"\nProcessed {len(valid_listings)} listings in current batch")
             
         end_time = datetime.now()
         print(f"\nFinished generating {num_listings} listings.")
@@ -851,12 +977,18 @@ async def generate_dataset(num_listings=5, batch_size=50):
     except Exception as e:
         print(f"Error during dataset generation: {e}")
     finally:
-        pool._remove_connections()
+        if pool:
+            pool._remove_connections()
+
+        if not exit_handler.should_exit:
+            end_time = datetime.now()
+            print(f"\nFinished generating {num_listings} listings.")
+            print(f"Total time taken: {end_time - start_time}")
 
 if __name__ == "__main__":
     try:
         os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
         asyncio.run(generate_dataset(num_listings=2000, batch_size=50))
     except KeyboardInterrupt:
-        print("\n  Process interrupted by user. Cleaning up...")
+        print("\nProcess interrupted by user. Cleaning up...")
         sys.exit(0)

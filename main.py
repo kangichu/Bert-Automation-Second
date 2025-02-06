@@ -2,6 +2,7 @@ import os
 import sys
 import logging
 import time
+import signal
 import argparse
 import asyncio
 from utils.logger import setup_logging
@@ -53,6 +54,10 @@ def main():
             storage_only = choice == '2'
             success = run_pipeline(train_only=train_only, storage=storage_only)
 
+            if train_only and success:
+                logging.info("Training completed successfully")
+                return
+
             if not success:
                 logging.error("Pipeline failed to complete successfully")
                 return
@@ -91,7 +96,7 @@ def main():
             asyncio.run(generate_dataset(num_listings, batch_size))
 
         else:
-            print("Invalid choice. Please run the script again with a valid option.")
+            print("\nInvalid choice. Please run the script again with a valid option.")
             sys.exit(1)
     
     except KeyboardInterrupt:

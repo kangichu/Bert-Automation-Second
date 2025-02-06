@@ -1,9 +1,13 @@
 import logging
 import faiss
 import numpy as np
+from pathlib import Path
 from handlers.listings_tracker.tracker import ListingsTracker
 
 RETRAIN_THRESHOLD = 0.5  # If new embeddings are ≥ 50% of stored ones, retrain
+# Create storage directory
+INDEX_DIR = Path("storage/faiss_indices")
+INDEX_DIR.mkdir(parents=True, exist_ok=True)
 
 def get_all_existing_embeddings(index_file):
     """
@@ -24,29 +28,40 @@ def get_all_existing_embeddings(index_file):
 def train_faiss_index(embeddings, nlist=100, m=8, index_file="faiss_index_ivfpq.bin"):
     """
     Train a FAISS index using IVF+PQ method.
-
-    :param embeddings: numpy array of embeddings
-    :param nlist: Number of clusters for the inverted file
-    :param m: Number of subquantizers for product quantization
-    :return: Trained FAISS index
     """
-    embeddings = embeddings.astype('float32')
-    dimension = embeddings.shape[1]
-    
-    # Create the quantizer (flat index for clustering)
-    quantizer = faiss.IndexFlatL2(dimension)
-    
-    # Create the IVF+PQ index
-    index = faiss.IndexIVFPQ(quantizer, dimension, nlist, m, 8)  # 8 bits per subquantizer
-    
-    # Train the index with a subset of embeddings (usually representative of the full dataset)
-    if not index.is_trained:
-        logging.info("Training the FAISS index with embeddings...")
-        index.train(embeddings)  # Use the embeddings to train the index
-    
-    faiss.write_index(index, index_file)  # Save trained index inside function
-    logging.info(f"Index trained and saved as {index_file}.")
-    return index
+    try:
+        embeddings = embeddings.astype('float32')
+        dimension = embeddings.shape[1]
+        num_points = embeddings.shape[0]
+        
+        # Validate data size
+        if num_points < 4000:
+            logging.warning(f"Small dataset ({num_points} points). Adjusting parameters.")
+            nlist = min(nlist, max(int(num_points/40), 4))
+            m = min(m, max(int(dimension/32), 4))
+        
+        logging.info(f"Training with {num_points} points, {nlist} clusters, {m} subquantizers")
+        
+        # Set up index path
+        index_path = INDEX_DIR / index_file
+        
+        # Create quantizer
+        quantizer = faiss.IndexFlatL2(dimension)
+        
+        # Create and train index
+        index = faiss.IndexIVFPQ(quantizer, dimension, nlist, m, 8)
+        
+        if not index.is_trained:
+            logging.info("Training FAISS index...")
+            index.train(embeddings)
+        
+        faiss.write_index(index, str(index_path))
+        logging.info(f"Index saved to {index_path}")
+        return index
+        
+    except Exception as e:
+        logging.error(f"Error training FAISS index: {e}")
+        raise
 
 def store_embeddings_in_trained_index(embeddings, index, index_file="faiss_index_ivfpq.bin"):
     """
