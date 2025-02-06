@@ -37,21 +37,27 @@ def main():
         # If no argument is passed, show the available options
         print("\nHere are the items that can be run:")
         options = {
-            "1": "run_pipeline --train-only - only train the model, converts listings to embeddings without storage",
-            "2": "run_pipeline --storage-only - only store embeddings, assumes embeddings are already generated",
-            "3": "update_pipeline - this is when you're adding new listings into the FAISS database",
-            "4": "generate_dataset - generate synthetic listing data"
+            "1": "generate_dataset - generate synthetic listing data for training the model. This is the first step in the pipeline",
+            "2": "run_pipeline --train-only - only train the model, converts listings to embeddings without storage. This is the second step in the pipeline",
+            "3": "run_pipeline --storage-only - only store embeddings, assumes embeddings are already generated. This is the third step in the pipeline",
+            "4": "update_pipeline - this is when you're adding new listings into the FAISS database. This is the fourth step in the pipeline"
         }
         for key, value in options.items():
             print(f"  {key}. {value}")
 
         choice = input("\nPlease select the number representing the function you want to run: ").strip()
         
-        if choice in ['1', '2']:
+        if choice == '1':
+            # Only this option runs async
+            num_listings = int(input("Number of listings (default 2000): ") or 2000)
+            batch_size = int(input("Batch size (default 50): ") or 50)
+            asyncio.run(generate_dataset(num_listings, batch_size))
+        
+        elif choice in ['2', '3']:
             # from pipeline.run_pipeline import run_pipeline
             run_pipeline = load_run_pipeline()
-            train_only = choice == '1'
-            storage_only = choice == '2'
+            train_only = choice == '2'
+            storage_only = choice == '3'
             success = run_pipeline(train_only=train_only, storage=storage_only)
 
             if train_only and success:
@@ -84,16 +90,10 @@ def main():
                         watcher.stop()
                         watcher.join()
 
-        elif choice == '3':
+        elif choice == '4':
             # from pipeline.update_pipeline import update_pipeline
             update_pipeline = load_update_pipeline()
             update_pipeline()
-
-        elif choice == '4':
-            # Only this option runs async
-            num_listings = int(input("Number of listings (default 2000): ") or 2000)
-            batch_size = int(input("Batch size (default 50): ") or 50)
-            asyncio.run(generate_dataset(num_listings, batch_size))
 
         else:
             print("\nInvalid choice. Please run the script again with a valid option.")
